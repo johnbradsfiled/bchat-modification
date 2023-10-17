@@ -1,0 +1,82 @@
+// Copyright © 2022 Rangeproof Pty Ltd. All rights reserved.
+
+import Foundation
+import GRDB
+import BChatUtilitiesKit
+
+/// This type is duplicate in both the database and within the SessionUtil config so should only ever have it's data changes via the
+/// `updateAllAndConfig` function. Updating it elsewhere could result in issues with syncing data between devices
+public struct Contact: Codable, Identifiable, Equatable, FetchableRecord, PersistableRecord, TableRecord, ColumnExpressible {
+    public static var databaseTableName: String { "contact" }
+    internal static let threadForeignKey = ForeignKey([Columns.id], to: [BChatThread.Columns.id])
+    public static let profile = hasOne(Profile.self, using: Profile.contactForeignKey)
+    
+    public typealias Columns = CodingKeys
+    public enum CodingKeys: String, CodingKey, ColumnExpression {
+        case id
+        
+        case isTrusted
+        case isApproved
+        case isBlocked
+        case didApproveMe
+        case hasBeenBlocked
+    }
+
+    /// The id for the contact (Note: This could be a sessionId, a blindedId or some future variant)
+    public let id: String
+    
+    /// This flag is used to determine whether we should auto-download files sent by this contact.
+    public let isTrusted: Bool
+    
+    /// This flag is used to determine whether message requests from this contact are approved
+    public let isApproved: Bool
+    
+    /// This flag is used to determine whether message requests from this contact are blocked
+    public let isBlocked: Bool
+    
+    /// This flag is used to determine whether this contact has approved the current users message request
+    public let didApproveMe: Bool
+    
+    /// This flag is used to determine whether this contact has ever been blocked (will be included in the config message if so)
+    public let hasBeenBlocked: Bool
+    
+    // MARK: - Relationships
+    
+    public var profile: QueryInterfaceRequest<Profile> {
+        request(for: Contact.profile)
+    }
+    
+    // MARK: - Initialization
+    
+    public init(
+        id: String,
+        isTrusted: Bool = false,
+        isApproved: Bool = false,
+        isBlocked: Bool = false,
+        didApproveMe: Bool = false,
+        hasBeenBlocked: Bool = false,
+        using dependencies: Dependencies = Dependencies()
+    ) {
+        self.id = id
+        self.isTrusted = (
+            isTrusted ||
+            id == getUserHexEncodedPublicKey(using: dependencies)  // Always trust ourselves
+        )
+        self.isApproved = isApproved
+        self.isBlocked = isBlocked
+        self.didApproveMe = didApproveMe
+        self.hasBeenBlocked = (isBlocked || hasBeenBlocked)
+    }
+}
+
+// MARK: - GRDB Interactions
+
+public extension Contact {
+    /// Fetches or creates a Contact for the specified user
+    ///
+    /// **Note:** This method intentionally does **not** save the newly created Contact,
+    /// it will need to be explicitly saved after calling
+    static func fetchOrCreate(_ db: Database, id: ID) -> Contact {
+        return ((try? fetchOne(db, id: id)) ?? Contact(id: id))
+    }
+}
